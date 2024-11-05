@@ -1,0 +1,447 @@
+---
+title: "addhealth_semtools"
+format: pdf
+editor: visual
+---
+
+```{r warning=FALSE, message=FALSE}
+
+library(dplyr)
+library(doParallel)
+library(ggplot2)
+library(here)
+library(lavaan)
+library(parallel)
+library(snow)
+library(tibble)
+library(tidyverse)
+source(here("read_format_addhealth_depression.R"))
+
+
+```
+
+# Lavaan syntax for the config models
+
+```{r}
+
+library(semTools)
+
+config_model_smt <-  '
+    eta1 =~ 
+         l1_w1 * i1_w1 +
+         l2_w1 * i2_w1 +
+         l3_w1 * i3_w1 +
+         l4_w1 * i4_w1 +
+         l5_w1 * i5_w1 +
+         l6_w1 * i6_w1 +
+         l7_w1 * i7_w1 +
+         l8_w1 * i8_w1
+
+    eta2 =~
+         l1_w2 * i1_w2 +
+         l2_w2 * i2_w2 +
+         l3_w2 * i3_w2 +
+         l4_w2 * i4_w2 +
+         l5_w2 * i5_w2 +
+         l6_w2 * i6_w2 +
+         l7_w2 * i7_w2 +
+         l8_w2 * i8_w2
+    eta3 =~ 
+         l1_w3 * i1_w3 +
+         l2_w3 * i2_w3 +
+         l3_w3 * i3_w3 +
+         l4_w3 * i4_w3 +
+         l5_w3 * i5_w3 +
+         l6_w3 * i6_w3 +
+         l7_w3 * i7_w3 +
+         l8_w3 * i8_w3
+    eta4 =~ 
+         l1_w4 * i1_w4 +
+         l2_w4 * i2_w4 +
+         l3_w4 * i3_w4 +
+         l4_w4 * i4_w4 +
+         l5_w4 * i5_w4 +
+         l6_w4 * i6_w4 +
+         l7_w4 * i7_w4 +
+         l8_w4 * i8_w4
+'
+
+config_model_smt_covs <-  '
+    eta1 =~ 
+         l1_w1 * i1_w1 +
+         l2_w1 * i2_w1 +
+         l3_w1 * i3_w1 +
+         l4_w1 * i4_w1 +
+         l5_w1 * i5_w1 +
+         l6_w1 * i6_w1 +
+         l7_w1 * i7_w1 +
+         l8_w1 * i8_w1
+
+    eta2 =~
+         l1_w2 * i1_w2 +
+         l2_w2 * i2_w2 +
+         l3_w2 * i3_w2 +
+         l4_w2 * i4_w2 +
+         l5_w2 * i5_w2 +
+         l6_w2 * i6_w2 +
+         l7_w2 * i7_w2 +
+         l8_w2 * i8_w2
+    eta3 =~ 
+         l1_w3 * i1_w3 +
+         l2_w3 * i2_w3 +
+         l3_w3 * i3_w3 +
+         l4_w3 * i4_w3 +
+         l5_w3 * i5_w3 +
+         l6_w3 * i6_w3 +
+         l7_w3 * i7_w3 +
+         l8_w3 * i8_w3
+    eta4 =~ 
+         l1_w4 * i1_w4 +
+         l2_w4 * i2_w4 +
+         l3_w4 * i3_w4 +
+         l4_w4 * i4_w4 +
+         l5_w4 * i5_w4 +
+         l6_w4 * i6_w4 +
+         l7_w4 * i7_w4 +
+         l8_w4 * i8_w4
+
+  i5_w1 ~~ i7_w1
+  i5_w2 ~~ i7_w2
+  i5_w3 ~~ i7_w3
+  i5_w4 ~~ i7_w4
+
+# Item 4 and Item 6, respectively:
+# "You had trouble keeping your mind on what you were doing."
+# "You felt that you were too tired to do things."
+
+  i4_w1 ~~ i6_w1
+  i4_w2 ~~ i6_w2
+  i4_w3 ~~ i6_w3
+  i4_w4 ~~ i6_w4
+
+# Item 2 and Item 5, respectively:
+# "You felt that you could not shake off the blues, even with help from your family and your friends."
+# "You felt depressed."
+  i2_w1 ~~ i5_w1
+  i2_w2 ~~ i5_w2
+  i2_w3 ~~ i5_w3
+  i2_w4 ~~ i5_w4
+
+# Item 2 and Item 7, respectively:
+# "You felt that you could not shake off the blues, even with help from your family and your friends."
+# "You felt sad."
+  i2_w1 ~~ i7_w1
+  i2_w2 ~~ i7_w2
+  i2_w3 ~~ i7_w3
+  i2_w4 ~~ i7_w4
+
+'
+
+```
+
+# Config Models
+
+```{r}
+
+longitudinal_factor_names <- list(
+  comp = c("eta1", "eta2", "eta3", "eta4")
+)
+
+longitudinal_ind <- list(
+    i1 = c("i1_w1", "i1_w2", "i1_w3", "i1_w4"),
+    i2 = c("i2_w1", "i2_w2", "i2_w3", "i2_w4"),
+    i3 = c("i3_w1", "i3_w2", "i3_w3", "i3_w4"),
+    i4 = c("i4_w1", "i4_w2", "i4_w3", "i4_w4"),
+    i5 = c("i5_w1", "i5_w2", "i5_w3", "i5_w4"),
+    i6 = c("i6_w1", "i6_w2", "i6_w3", "i6_w4"),
+    i7 = c("i7_w1", "i7_w2", "i7_w3", "i7_w4"),
+    i8 = c("i8_w1", "i8_w2", "i8_w3", "i8_w4")
+)
+
+
+config_model_smt <- semTools::measEq.syntax(
+  configural.model = config_model_smt,
+  longFacNames = longitudinal_factor_names,
+  ID.fac = "fixed.factor",
+  ID.cat = "Wu.Estabrook.2016",
+  data = dat
+)
+config_model_smt <- as.character(config_model_smt)
+
+
+
+config_model_smt_covs <- semTools::measEq.syntax(
+  configural.model = config_model_smt_covs,
+  longFacNames = longitudinal_factor_names,
+  ID.fac = "fixed.factor",
+  ID.cat = "Wu.Estabrook.2016",
+  data = dat
+)
+config_model_smt_covs <- as.character(config_model_smt_covs)
+
+```
+
+# Weak Model
+
+```{r}
+
+weak_model_smt_covs <- semTools::measEq.syntax(
+  configural.model = config_model_smt_covs,
+  longFacNames = longitudinal_factor_names,
+  ID.fac = "std.lv",
+  ID.cat = "Wu.Estabrook.2016",
+  long.equal = c("loadings"),
+  data = dat
+)
+
+weak_model_smt_covs <- as.character(weak_model_smt_covs)
+```
+
+# Strong Model
+
+```{r}
+strong_model_smt_covs <- semTools::measEq.syntax(
+  configural.model = config_model_smt_covs,
+  longFacNames = longitudinal_factor_names,
+  ID.fac = "std.lv",
+  ID.cat = "Wu.Estabrook.2016",
+  long.equal = c("loadings", "intercepts"),
+  data = dat
+)
+strong_model_smt_covs <- as.character(strong_model_smt_covs)
+
+
+```
+
+# Strict Model
+
+```{r}
+# Covs
+strict_model_smt_covs <- measEq.syntax(
+  configural.model = config_model_smt_covs,
+  longFacNames = longitudinal_factor_names,
+  ID.fac = "std.lv",
+  ID.cat = "Wu.Estabrook.2016",
+  long.equal = c("loadings", "intercepts", "residuals"),
+  data = dat
+)
+
+strict_model_smt_covs <- as.character(strict_model_smt_covs)
+```
+
+# Multithreading to fit the models
+
+```{r}
+config_model_smt <- as.character(config_model_smt)
+
+list_all_fit_files_sempt <- list(
+  config_model_smt       = config_model_smt,			     
+  config_model_smt_covs  = config_model_smt_covs,
+  weak_model_smt_covs    = weak_model_smt_covs,
+  strong_model_smt_covs  = strong_model_smt_covs,
+  strict_model_smt_covs  = strict_model_smt_covs
+)
+
+
+
+RunCFA_sempt <- function(model, test = FALSE) {
+  if (test) {
+    res <- lavaan::cfa(model, data = dat)
+  } else {
+    res <- lavaan::cfa(model, data = dat, 
+                          estimator = "MLR",
+                          meanstructure = TRUE,
+                          fixed.x = FALSE,
+                          missing = "FIML",
+                          se = "robust.mlr")
+  }
+}
+
+n_cores <- (parallel::detectCores() / 2)
+
+cl <- makeCluster(n_cores)
+doParallel::registerDoParallel(cl)
+
+snow::clusterExport(cl, c("list_all_fit_files_sempt", "RunCFA_sempt", "dat"))
+
+
+system.time({
+  list_all_res_sempt <- snow::clusterApply(
+    cl, 
+    seq_along(list_all_fit_files_sempt), 
+    function(fit_model_num) {
+      print(names(list_all_fit_files_sempt)[fit_model_num])
+      fit_cfa_sempt <- RunCFA_sempt(
+        list_all_fit_files_sempt[[fit_model_num]],
+        # do test = TRUE to test with ML, much faster
+        test = FALSE
+        )
+      return(fit_cfa_sempt)
+    }) 
+  names(list_all_res_sempt) <- names(list_all_fit_files_sempt)
+})
+
+#list_all_res_sempt
+
+
+#cat(list_all_fit_files_sempt$strong_model_smt_covs)
+
+
+
+```
+
+# TODO: Partial Invariance!Using the same syntax as it would for group.partial, though that doesn't free the intercepts.
+
+# TODO: lavPredict, factor scores for bartlett, get descriptives for each based on partial invariance model (or if doesn't work, then strong)
+
+```{r}
+
+partial_strong_model_smt_covs <- measEq.syntax(
+  configural.model = config_model_smt_covs,
+  longFacNames = longitudinal_factor_names,
+  longIndNames = longitudinal_ind,
+  ID.fac = "std.lv",
+  ID.cat = "Wu.Estabrook.2016",
+  long.equal = c("loadings", "intercepts"),
+  data = dat
+)
+
+cat(as.character(partial_strong_model_smt_covs))
+
+partial_strong_model_smt_covs_free_64 <- 
+  update(partial_strong_model_smt_covs, change.syntax = 
+                   "i6_w4 ~ NA*1 + nu.6_4*1")
+
+partial_strong_model_smt_covs_free_64_33 <- 
+  update(partial_strong_model_smt_covs_free_64, change.syntax = 
+                   "i3_w3 ~ NA*1 + nu.3_3*1")
+
+partial_strong_model_smt_covs_free_64_33_34 <- 
+  update(partial_strong_model_smt_covs_free_64_33, change.syntax = 
+                   "i3_w4 ~ NA*1 + nu.3_4*1")
+
+partial_strong_model_smt_covs_free_64_33_34_43 <- 
+  update(partial_strong_model_smt_covs_free_64_33_34, change.syntax = 
+                   "i4_w3 ~ NA*1 + nu.4_3*1")
+
+partial_strong_model_smt_covs_free_64_33_34_43_81 <- 
+  update(partial_strong_model_smt_covs_free_64_33_34_43, change.syntax = 
+                   "i8_w1 ~ NA*1 + nu.8_1*1")
+
+partial_strong_model_smt_covs_free_64_33_34_43_81_51 <- 
+  update(partial_strong_model_smt_covs_free_64_33_34_43_81, change.syntax = 
+                   "i5_w1 ~ NA*1 + nu.5_1*1")
+
+partial_strong_model_smt_covs_free_64_33_34_43_81_51_52 <- 
+  update(partial_strong_model_smt_covs_free_64_33_34_43_81_51, change.syntax = 
+                   "i5_w2 ~ NA*1 + nu.5_2*1")
+
+partial_strong_model_smt_covs_free_64_33_34_43_81_51_52_13 <- 
+  update(partial_strong_model_smt_covs_free_64_33_34_43_81_51_52, change.syntax = 
+                   "i1_w3 ~ NA*1 + nu.1_3*1")
+
+
+
+```
+
+```{r}
+partial_strong_model_smt_covs_free_64 <- 
+  as.character(partial_strong_model_smt_covs_free_64)
+
+partial_strong_model_smt_covs_free_64_33 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33)
+
+partial_strong_model_smt_covs_free_64_33_34 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33_34)
+
+partial_strong_model_smt_covs_free_64_33_34_43 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33_34_43)
+
+partial_strong_model_smt_covs_free_64_33_34_43_81 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33_34_43_81)
+
+partial_strong_model_smt_covs_free_64_33_34_43_81_51 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33_34_43_81_51)
+
+partial_strong_model_smt_covs_free_64_33_34_43_81_51_52 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33_34_43_81_51_52)
+
+partial_strong_model_smt_covs_free_64_33_34_43_81_51_52_13 <- 
+  as.character(partial_strong_model_smt_covs_free_64_33_34_43_81_51_52_13)
+
+cat(partial_strong_model_smt_covs_free_64_33_34_43_81_51_52_13)
+
+
+list_all_fit_files_sempt_partial <- list(
+  partial_strong_model_smt_covs_free_64  = partial_strong_model_smt_covs_free_64,
+  partial_strong_model_smt_covs_free_64_33  = partial_strong_model_smt_covs_free_64_33,
+  partial_strong_model_smt_covs_free_64_33_34  = partial_strong_model_smt_covs_free_64_33_34,
+  partial_strong_model_smt_covs_free_64_33_34_43  = partial_strong_model_smt_covs_free_64_33_34_43,
+  partial_strong_model_smt_covs_free_64_33_34_43_81  = partial_strong_model_smt_covs_free_64_33_34_43_81,
+  partial_strong_model_smt_covs_free_64_33_34_43_81_51  = partial_strong_model_smt_covs_free_64_33_34_43_81_51,
+  partial_strong_model_smt_covs_free_64_33_34_43_81_51_52  = partial_strong_model_smt_covs_free_64_33_34_43_81_51_52,
+  partial_strong_model_smt_covs_free_64_33_34_43_81_51_52_13  = partial_strong_model_smt_covs_free_64_33_34_43_81_51_52_13)
+
+
+RunCFA_sempt <- function(model, test = FALSE) {
+  if (test) {
+    res <- lavaan::cfa(model, data = dat)
+  } else {
+    res <- lavaan::cfa(model, data = dat, 
+                          estimator = "MLR",
+                          meanstructure = TRUE,
+                          fixed.x = FALSE,
+                          missing = "FIML",
+                          se = "robust.mlr")
+  }
+}
+
+n_cores <- (parallel::detectCores() - 2)
+
+cl <- makeCluster(n_cores)
+doParallel::registerDoParallel(cl)
+
+snow::clusterExport(cl, c("list_all_fit_files_sempt_partial", "RunCFA_sempt", "dat"))
+
+
+system.time({
+  list_all_res_sempt_partial <- snow::clusterApply(
+    cl, 
+    seq_along(list_all_fit_files_sempt_partial), 
+    function(fit_model_num) {
+      print(names(list_all_fit_files_sempt_partial)[fit_model_num])
+      fit_cfa_sempt <- RunCFA_sempt(
+        list_all_fit_files_sempt_partial[[fit_model_num]],
+        # do test = TRUE to test with ML, much faster
+        test = FALSE
+        )
+      return(fit_cfa_sempt)
+    }) 
+  names(list_all_res_sempt_partial) <- names(list_all_fit_files_sempt_partial)
+})
+
+list_all_res_sempt_partial
+
+```
+
+
+```{r}
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
